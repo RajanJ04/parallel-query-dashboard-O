@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Parallel Query Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+    margin: 0;
+    font-family: 'Segoe UI', sans-serif;
+    background: linear-gradient(to right, #020617, #0f172a);
+    color: white;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    padding: 20px 40px;
+    font-weight: bold;
+}
+
+.main {
+    display: flex;
+    gap: 20px;
+    padding: 20px;
+}
+
+.left { width: 70%; }
+.right { width: 30%; }
+
+.card {
+    background: #0f172a;
+    border-radius: 15px;
+    padding: 20px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+button {
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: none;
+    margin-right: 10px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.seq { background: #22c55e; }
+.par { background: linear-gradient(to right, #3b82f6, #9333ea); color: white; }
+
+.progress {
+    margin-top: 15px;
+    background: #1e293b;
+    height: 8px;
+    border-radius: 10px;
+}
+.bar {
+    height: 100%;
+    width: 0%;
+    background: #22c55e;
+}
+
+.thread-container {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 20px;
+}
+
+.thread-box {
+    width: 120px;
+    height: 120px;
+    border-radius: 15px;
+    border: 1px solid #6366f1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-bottom: 10px;
+}
+
+.idle { background: #22c55e; }
+.working { background: #facc15; }
+.done { background: #3b82f6; }
+
+.legend span { margin-right: 15px; }
+
+.explain p {
+    font-size: 14px;
+    color: #cbd5f5;
+}
+
+.highlight {
+    color: #38bdf8;
+    font-weight: bold;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <div>📊 Parallel Query Dashboard</div>
+</header>
+
+<div class="main">
+
+<div class="left">
+
+<div class="card">
+    <button class="seq" onclick="runSequential()">▶ Run Sequential</button>
+    <button class="par" onclick="runParallel()">⚡ Run Parallel</button>
+
+    <div class="progress">
+        <div class="bar" id="bar"></div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>📈 Results</h3>
+    <p id="result">Execution results will appear here</p>
+</div>
+
+<div class="card">
+    <h3>🧵 Thread Activity</h3>
+
+    <div class="thread-container">
+        <div class="thread-box"><div class="dot idle"></div><b>T1</b><small>Idle</small></div>
+        <div class="thread-box"><div class="dot idle"></div><b>T2</b><small>Idle</small></div>
+        <div class="thread-box"><div class="dot idle"></div><b>T3</b><small>Idle</small></div>
+        <div class="thread-box"><div class="dot idle"></div><b>T4</b><small>Idle</small></div>
+    </div>
+
+    <div class="legend">
+        <span>🟢 Idle</span>
+        <span>🟡 Working</span>
+        <span>🔵 Completed</span>
+    </div>
+
+    <p style="margin-top:15px;">
+    Each thread processes a portion of the dataset simultaneously.
+    </p>
+
+</div>
+
+<div class="card">
+    <canvas id="chart"></canvas>
+</div>
+
+</div>
+
+<div class="right card explain">
+    <h3>📘 Explanation</h3>
+
+    <p><span class="highlight">Parallelization:</span> dividing tasks into multiple threads.</p>
+    <p><span class="highlight">Sequential:</span> one thread → slower.</p>
+    <p><span class="highlight">Parallel:</span> multiple threads → faster.</p>
+    <p><span class="highlight">Speedup:</span> Seq / Parallel</p>
+    <p><span class="highlight">Efficiency:</span> Speedup / Threads × 100</p>
+</div>
+
+</div>
+
+<script>
+
+let db = [];
+let seqTime = 0;
+let parTime = 0;
+
+// Generate data
+for(let i=0;i<100000;i++){
+    db.push({salary:Math.random()*90000+10000});
+}
+
+// Progress bar
+function animateBar(){
+    let bar = document.getElementById("bar");
+    bar.style.width="0%";
+    let w=0;
+    let interval=setInterval(()=>{
+        w+=2;
+        bar.style.width=w+"%";
+        if(w>=100) clearInterval(interval);
+    },20);
+}
+
+// Update thread status
+function setThreadStatus(index, status){
+    let box = document.querySelectorAll(".thread-box")[index];
+    let dot = box.querySelector(".dot");
+    let text = box.querySelector("small");
+
+    dot.className = "dot " + status;
+
+    if(status==="idle") text.innerText="Idle";
+    if(status==="working") text.innerText="Working";
+    if(status==="done") text.innerText="Completed";
+}
+
+// Sequential
+function runSequential(){
+    animateBar();
+
+    let start = performance.now();
+
+    let sum=0;
+    for(let i=0;i<db.length;i++){
+        if(db[i].salary>50000) sum+=db[i].salary;
+    }
+
+    seqTime = performance.now() - start;
+
+    document.getElementById("result").innerHTML =
+    `Sequential Time: ${seqTime.toFixed(2)} ms`;
+
+    updateChart();
+}
+
+// Parallel
+function runParallel(){
+    animateBar();
+
+    let chunk = Math.floor(db.length/4);
+    let completed = 0;
+
+    let start = performance.now();
+
+    for(let i=0;i<4;i++){
+
+        setThreadStatus(i,"working");
+
+        let worker = new Worker(URL.createObjectURL(new Blob([`
+            onmessage = function(e){
+                let sum=0;
+                for(let i=0;i<e.data.length;i++){
+                    if(e.data[i].salary>50000) sum+=e.data[i].salary;
+                }
+                postMessage(sum);
+            }
+        `],{type:'text/javascript'})));
+
+        worker.postMessage(db.slice(i*chunk,(i+1)*chunk));
+
+        worker.onmessage = function(){
+            setThreadStatus(i,"done");
+
+            completed++;
+
+            if(completed===4){
+                parTime = performance.now() - start;
+
+                let speedup = seqTime/parTime;
+                let efficiency = (speedup/4)*100;
+
+                document.getElementById("result").innerHTML =
+                `Parallel Time: ${parTime.toFixed(2)} ms <br>
+                 🚀 Speedup: ${speedup.toFixed(2)}x <br>
+                 ⚡ Efficiency: ${efficiency.toFixed(2)}%`;
+
+                updateChart();
+            }
+        };
+    }
+}
+
+// Chart
+let chart;
+
+function updateChart(){
+    if(!seqTime || !parTime) return;
+
+    if(chart) chart.destroy();
+
+    chart = new Chart(document.getElementById("chart"),{
+        type:'bar',
+        data:{
+            labels:['Sequential','Parallel'],
+            datasets:[{
+                label:'Execution Time (ms)',
+                data:[seqTime,parTime]
+            }]
+        }
+    });
+}
+
+</script>
+
+</body>
+</html>
